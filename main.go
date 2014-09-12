@@ -221,6 +221,10 @@ func processLog(location *LocationResponse) {
 		}
 
 		splitLine := bytes.SplitN(line, logSeparator, 14)
+
+		if len(splitLine) < 13 {
+			return
+		}
 		sha.Write(splitLine[12])
 
 		logTimestamp, err := time.Parse(logTimeLayout, string(splitLine[0]))
