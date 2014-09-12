@@ -27,7 +27,7 @@ const logTimeLayout = "2006-01-02T15:04:05Z"
 const filenameTimeLayout = "20060102T1504Z"
 
 var dynamoTable string
-var locations chan *LocationResponse = make(chan *LocationResponse, 100000000)
+var locations chan *LocationResponse = make(chan *LocationResponse, 1000000)
 var infoLog bool
 var queueName string
 var logSeparator = []byte(" ")
