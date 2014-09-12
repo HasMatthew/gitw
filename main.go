@@ -19,7 +19,6 @@ import (
 	"github.com/goamz/goamz/s3"
 )
 
-const PORT = 8080
 const dynamoTable = "gitw_dev_contest"
 const s3Bucket = "mat_scratch"
 const accessKey = "AKIAJN5MMZYW7MAU27NQ"
@@ -42,19 +41,20 @@ var pk dynamodb.PrimaryKey = dynamodb.PrimaryKey{
 }
 
 func main() {
+	port := os.Getenv("GITW_PORT")
 	AutoGOMAXPROCS()
 
 	go processLog(locations)
 
 	s := &http.Server{
-		Addr:           ":" + strconv.Itoa(PORT),
+		Addr:           ":" + port,
 		Handler:        &Handler{},
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	log.Infof("Listening on port %d...\n", PORT)
+	log.Infof("Listening on port %s...\n", port)
 	log.Fatalln(s.ListenAndServe())
 }
 
