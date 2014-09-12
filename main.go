@@ -27,7 +27,7 @@ const secretKey = "GfMawMA2BooVcnwP7lBwiRDnCWm99Rq2OJ813B1O"
 const logTimeLayout = "2006-01-02T15:04:05Z"
 const filenameTimeLayout = "20060102T1504Z"
 
-// var locations chan *LocationResponse = make(chan *LocationResponse, 10000000)
+var locations chan *LocationResponse = make(chan *LocationResponse, 10000000)
 var infoLog bool
 var queueName string
 var logSeparator = []byte(" ")
@@ -44,17 +44,33 @@ var pk dynamodb.PrimaryKey = dynamodb.PrimaryKey{
 }
 
 func main() {
+	AutoGOMAXPROCS()
+
 	port := os.Getenv("GITW_PORT")
 	hostNum := os.Getenv("HOST_NUM")
 	if hostNum == "" {
 		log.Fatalln("HOST_NUM must be set!")
 	}
 	infoLog = os.Getenv("INFO_LOG") != "off"
+	workers, err := strconv.Atoi(os.Getenv("WORKERS"))
+	if err != nil {
+		log.Fatalln("Error parsing WORKERS: ", err)
+	}
 
 	queueName = "gitw_" + hostNum
-	AutoGOMAXPROCS()
 
 	// go processLog(locations)
+	if infoLog {
+		log.Infof("Starting %d workers...", workers)
+	}
+	var outs []chan *LocationResponse
+	for i := 0; i < workers; i++ {
+		ch := make(chan *LocationResponse, 128)
+		outs = append(outs, ch)
+		go processLogWorker(ch)
+	}
+
+	go distribute(locations, outs)
 
 	s := &http.Server{
 		Addr:           ":" + port,
@@ -154,8 +170,8 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 		log.Error("Error marshalling JSON: ", err)
 	}
 
-	// locations <- location
-	go processLog(location)
+	locations <- location
+	// go processLog(location)
 
 	writer.Write(jsonResponse)
 }
@@ -248,9 +264,26 @@ func processLog(location *LocationResponse) {
 	queue.SendMessage(string(message))
 }
 
-// func processLogChan(in <-chan *LocationResponse) {
-// 	for {
-// 		location := <-in
-//		processLog(location)
-// 	}
-// }
+func distribute(in <-chan *LocationResponse, outs []chan *LocationResponse) {
+	chans := len(outs)
+	for i := 0; ; i++ {
+		location := <-in
+		if infoLog {
+			log.Infof("Distributing location %s to chan %d", location.Bucket, i%chans)
+		}
+		outs[i%chans] <- location
+	}
+}
+
+func processLogWorker(in <-chan *LocationResponse) {
+	if infoLog {
+		log.Info("Starting worker...")
+	}
+	for {
+		location := <-in
+		if infoLog {
+			log.Info("Processing: ", location.Bucket)
+		}
+		processLog(location)
+	}
+}
