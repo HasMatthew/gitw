@@ -28,6 +28,7 @@ const logTimeLayout = "2006-01-02T15:04:05Z"
 const filenameTimeLayout = "20060102T1504Z"
 
 // var locations chan *LocationResponse = make(chan *LocationResponse, 10000000)
+var infoLog bool
 var queueName string
 var logSeparator = []byte(" ")
 var awsRegion aws.Region = aws.USEast
@@ -48,6 +49,7 @@ func main() {
 	if hostNum == "" {
 		log.Fatalln("HOST_NUM must be set!")
 	}
+	infoLog = os.Getenv("INFO_LOG") != "off"
 
 	queueName = "gitw_" + hostNum
 	AutoGOMAXPROCS()
@@ -138,7 +140,9 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 		RandLine: item["randLine"].Value,
 	}
 
-	log.Infof("S3 key: %s", location.Bucket)
+	if infoLog {
+		log.Infof("S3 key: %s", location.Bucket)
+	}
 
 	response := GUIDResponse{
 		GuidHash:   location.Hash,
@@ -157,10 +161,11 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 }
 
 func processLog(location *LocationResponse) {
-	log.Info("Line number: ", location.RandLine)
+	// log.Info("Line number: ", location.RandLine)
 	lineNumber, err := strconv.Atoi(location.RandLine)
 	if err != nil {
 		log.Error("Error converting randLine to int: ", err)
+		return
 	}
 
 	reader, err := s3.New(awsAuth, awsRegion).Bucket(s3Bucket).GetReader(location.Bucket)
@@ -171,8 +176,11 @@ func processLog(location *LocationResponse) {
 	filenameTimestamp, err := time.Parse(filenameTimeLayout, s3KeyParts[5])
 	if err != nil {
 		log.Error("Error parsing filename timestamp: ", err)
+		return
 	}
-	log.Info("Filename timestamp: ", filenameTimestamp.String())
+	if infoLog {
+		log.Info("Filename timestamp: ", filenameTimestamp.String())
+	}
 
 	var sumT int = 0
 	sha := sha256.New()
@@ -180,6 +188,7 @@ func processLog(location *LocationResponse) {
 		line, _, err := bufReader.ReadLine()
 		if err != nil {
 			log.Error("Error reading from S3 buffered: ", err)
+			return
 		}
 
 		splitLine := bytes.SplitN(line, logSeparator, 14)
@@ -188,23 +197,32 @@ func processLog(location *LocationResponse) {
 		logTimestamp, err := time.Parse(logTimeLayout, string(splitLine[0]))
 		if err != nil {
 			log.Error("Error parsing log line timestamp: ", err)
+			return
 		}
-		log.Info("Log timestamp: ", logTimestamp.String())
+		if infoLog {
+			log.Info("Log timestamp: ", logTimestamp.String())
+		}
 
 		timeDifference := int(filenameTimestamp.Sub(logTimestamp).Seconds())
 		if timeDifference < 0 {
 			timeDifference = 0
 		}
 
-		log.Infof("Time diff: %d", timeDifference)
+		if infoLog {
+			log.Infof("Time diff: %d", timeDifference)
+		}
 		sumT += timeDifference
 	}
 
-	log.Infof("Time difference sum: %d", sumT)
+	if infoLog {
+		log.Infof("Time difference sum: %d", sumT)
+	}
 
 	cksum := sha.Sum(nil)
 
-	log.Info("cksum1: ", hex.EncodeToString(cksum))
+	if infoLog {
+		log.Info("cksum1: ", hex.EncodeToString(cksum))
+	}
 
 	for i := 0; i < sumT+1; i++ {
 		sha := sha256.New()
@@ -219,7 +237,9 @@ func processLog(location *LocationResponse) {
 	if err != nil {
 		log.Error("Error marshalling SQS message JSON: ", err)
 	}
-	log.Info("SQS message: ", string(message))
+	if infoLog {
+		log.Info("SQS message: ", string(message))
+	}
 
 	queue, err := sqs.New(awsAuth, awsRegion).GetQueue(queueName)
 	if err != nil {
