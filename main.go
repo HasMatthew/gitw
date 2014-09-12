@@ -149,8 +149,8 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 
 	digest := sha256.Sum256([]byte(guidRequest.Guid))
 	hashKey := hex.EncodeToString(digest[:])
-	item, err := locationsTable.GetItem(&dynamodb.Key{HashKey: hashKey})
-	// item, err := locationsTable.GetItem(&dynamodb.Key{HashKey: guidRequest.Guid})
+	// item, err := locationsTable.GetItem(&dynamodb.Key{HashKey: hashKey})
+	item, err := locationsTable.GetItem(&dynamodb.Key{HashKey: guidRequest.Guid})
 	if err != nil {
 		log.Error("Error getting item from table: ", err)
 		http.Error(writer, err.Error(), 500)
@@ -175,6 +175,8 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 	jsonResponse, err := json.Marshal(response)
 	if err != nil {
 		log.Error("Error marshalling JSON: ", err)
+		http.Error(writer, err.Error(), 500)
+		return
 	}
 
 	locations <- location
@@ -192,6 +194,10 @@ func processLog(location *LocationResponse) {
 	}
 
 	reader, err := s3.New(awsAuth, awsRegion).Bucket(s3Bucket).GetReader(location.Bucket)
+	if err != nil {
+		log.Error("Error getting S3 reader: ", err)
+		return
+	}
 	bufReader := bufio.NewReader(reader)
 	defer reader.Close()
 
@@ -259,6 +265,7 @@ func processLog(location *LocationResponse) {
 	})
 	if err != nil {
 		log.Error("Error marshalling SQS message JSON: ", err)
+		return
 	}
 	if infoLog {
 		log.Info("SQS message: ", string(message))
@@ -267,6 +274,7 @@ func processLog(location *LocationResponse) {
 	queue, err := sqs.New(awsAuth, awsRegion).GetQueue(queueName)
 	if err != nil {
 		log.Error("Error getting queue: ", err)
+		return
 	}
 	queue.SendMessage(string(message))
 }
