@@ -17,6 +17,7 @@ import (
 	"github.com/goamz/goamz/aws"
 	"github.com/goamz/goamz/dynamodb"
 	"github.com/goamz/goamz/s3"
+	"github.com/goamz/goamz/sqs"
 )
 
 const dynamoTable = "gitw_dev_contest"
@@ -26,7 +27,8 @@ const secretKey = "GfMawMA2BooVcnwP7lBwiRDnCWm99Rq2OJ813B1O"
 const logTimeLayout = "2006-01-02T15:04:05Z"
 const filenameTimeLayout = "20060102T1504Z"
 
-var locations chan *LocationResponse = make(chan *LocationResponse, 10000000)
+// var locations chan *LocationResponse = make(chan *LocationResponse, 10000000)
+var queueName string
 var logSeparator = []byte(" ")
 var awsRegion aws.Region = aws.USEast
 var awsAuth aws.Auth = aws.Auth{
@@ -42,9 +44,15 @@ var pk dynamodb.PrimaryKey = dynamodb.PrimaryKey{
 
 func main() {
 	port := os.Getenv("GITW_PORT")
+	hostNum := os.Getenv("HOST_NUM")
+	if hostNum == "" {
+		log.Fatalln("HOST_NUM must be set!")
+	}
+
+	queueName = "gitw_" + hostNum
 	AutoGOMAXPROCS()
 
-	go processLog(locations)
+	// go processLog(locations)
 
 	s := &http.Server{
 		Addr:           ":" + port,
@@ -125,7 +133,6 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 	}
 
 	location := &LocationResponse{
-		// Hash:     item["hash"].Value,
 		Hash:     hashKey,
 		Bucket:   item["bucket"].Value,
 		RandLine: item["randLine"].Value,
@@ -143,77 +150,87 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 		log.Error("Error marshalling JSON: ", err)
 	}
 
-	locations <- location
+	// locations <- location
+	go processLog(location)
 
 	writer.Write(jsonResponse)
 }
 
-func processLog(in <-chan *LocationResponse) {
-	for {
-		location := <-in
-
-		log.Info("Line number: ", location.RandLine)
-		lineNumber, err := strconv.Atoi(location.RandLine)
-		if err != nil {
-			log.Error("Error converting randLine to int: ", err)
-		}
-
-		reader, err := s3.New(awsAuth, awsRegion).Bucket(s3Bucket).GetReader(location.Bucket)
-		bufReader := bufio.NewReader(reader)
-		defer reader.Close()
-
-		s3KeyParts := strings.SplitN(location.Bucket, "_", 7)
-		filenameTimestamp, err := time.Parse(filenameTimeLayout, s3KeyParts[5])
-		if err != nil {
-			log.Error("Error parsing filename timestamp: ", err)
-		}
-		log.Info("Filename timestamp: ", filenameTimestamp.String())
-
-		var sumT int = 0
-		sha := sha256.New()
-		for i := 0; i < lineNumber; i++ {
-			line, _, err := bufReader.ReadLine()
-			if err != nil {
-				log.Error("Error reading from S3 buffered: ", err)
-			}
-
-			splitLine := bytes.SplitN(line, logSeparator, 14)
-			sha.Write(splitLine[12])
-
-			logTimestamp, err := time.Parse(logTimeLayout, string(splitLine[0]))
-			if err != nil {
-				log.Error("Error parsing log line timestamp: ", err)
-			}
-			log.Info("Log timestamp: ", logTimestamp.String())
-
-			timeDifference := int(filenameTimestamp.Sub(logTimestamp).Seconds())
-			if timeDifference < 0 {
-				timeDifference = 0
-			}
-
-			log.Infof("Time diff: %d", timeDifference)
-			sumT += timeDifference
-		}
-
-		log.Infof("Time difference sum: %d", sumT)
-
-		cksum := sha.Sum(nil)
-
-		log.Info("cksum1: ", hex.EncodeToString(cksum))
-
-		for i := 0; i < sumT+1; i++ {
-			sha := sha256.New()
-			sha.Write(cksum)
-			cksum = sha.Sum(nil)
-		}
-
-		message, err := json.Marshal(SQSMessage{
-			GuidHash:   location.Hash,
-			ResultHash: hex.EncodeToString(cksum),
-		})
-		if err != nil {
-			log.Error("Error marshalling SQS message JSON: ", err)
-		}
-		log.Info("SQS message: ", string(message))
+func processLog(location *LocationResponse) {
+	log.Info("Line number: ", location.RandLine)
+	lineNumber, err := strconv.Atoi(location.RandLine)
+	if err != nil {
+		log.Error("Error converting randLine to int: ", err)
 	}
+
+	reader, err := s3.New(awsAuth, awsRegion).Bucket(s3Bucket).GetReader(location.Bucket)
+	bufReader := bufio.NewReader(reader)
+	defer reader.Close()
+
+	s3KeyParts := strings.SplitN(location.Bucket, "_", 7)
+	filenameTimestamp, err := time.Parse(filenameTimeLayout, s3KeyParts[5])
+	if err != nil {
+		log.Error("Error parsing filename timestamp: ", err)
+	}
+	log.Info("Filename timestamp: ", filenameTimestamp.String())
+
+	var sumT int = 0
+	sha := sha256.New()
+	for i := 0; i < lineNumber; i++ {
+		line, _, err := bufReader.ReadLine()
+		if err != nil {
+			log.Error("Error reading from S3 buffered: ", err)
+		}
+
+		splitLine := bytes.SplitN(line, logSeparator, 14)
+		sha.Write(splitLine[12])
+
+		logTimestamp, err := time.Parse(logTimeLayout, string(splitLine[0]))
+		if err != nil {
+			log.Error("Error parsing log line timestamp: ", err)
+		}
+		log.Info("Log timestamp: ", logTimestamp.String())
+
+		timeDifference := int(filenameTimestamp.Sub(logTimestamp).Seconds())
+		if timeDifference < 0 {
+			timeDifference = 0
+		}
+
+		log.Infof("Time diff: %d", timeDifference)
+		sumT += timeDifference
+	}
+
+	log.Infof("Time difference sum: %d", sumT)
+
+	cksum := sha.Sum(nil)
+
+	log.Info("cksum1: ", hex.EncodeToString(cksum))
+
+	for i := 0; i < sumT+1; i++ {
+		sha := sha256.New()
+		sha.Write(cksum)
+		cksum = sha.Sum(nil)
+	}
+
+	message, err := json.Marshal(SQSMessage{
+		GuidHash:   location.Hash,
+		ResultHash: hex.EncodeToString(cksum),
+	})
+	if err != nil {
+		log.Error("Error marshalling SQS message JSON: ", err)
+	}
+	log.Info("SQS message: ", string(message))
+
+	queue, err := sqs.New(awsAuth, awsRegion).GetQueue(queueName)
+	if err != nil {
+		log.Error("Error getting queue: ", err)
+	}
+	queue.SendMessage(string(message))
 }
+
+// func processLogChan(in <-chan *LocationResponse) {
+// 	for {
+// 		location := <-in
+//		processLog(location)
+// 	}
+// }
