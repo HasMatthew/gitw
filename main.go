@@ -19,7 +19,7 @@ import (
 	"github.com/goamz/goamz/s3"
 )
 
-const PORT = 3000
+const PORT = 8080
 const dynamoTable = "gitw_dev_contest"
 const s3Bucket = "mat_scratch"
 const accessKey = "AKIAJN5MMZYW7MAU27NQ"
@@ -169,7 +169,6 @@ func processLog(in <-chan *LocationResponse) {
 		}
 		log.Info("Filename timestamp: ", filenameTimestamp.String())
 
-		// var urlBuffer bytes.Buffer
 		var sumT int = 0
 		sha := sha256.New()
 		for i := 0; i < lineNumber; i++ {
@@ -179,7 +178,6 @@ func processLog(in <-chan *LocationResponse) {
 			}
 
 			splitLine := bytes.SplitN(line, logSeparator, 14)
-			// urlBuffer.Write(splitLine[12])
 			sha.Write(splitLine[12])
 
 			logTimestamp, err := time.Parse(logTimeLayout, string(splitLine[0]))
@@ -200,9 +198,13 @@ func processLog(in <-chan *LocationResponse) {
 		log.Infof("Time difference sum: %d", sumT)
 
 		cksum := sha.Sum(nil)
+
+		log.Info("cksum1: ", hex.EncodeToString(cksum))
+
 		for i := 0; i < sumT+1; i++ {
-			res := sha256.Sum256(cksum)
-			cksum = res[:]
+			sha := sha256.New()
+			sha.Write(cksum)
+			cksum = sha.Sum(nil)
 		}
 
 		message, err := json.Marshal(SQSMessage{
