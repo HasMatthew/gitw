@@ -149,8 +149,8 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 
 	digest := sha256.Sum256([]byte(guidRequest.Guid))
 	hashKey := hex.EncodeToString(digest[:])
-	// item, err := locationsTable.GetItem(&dynamodb.Key{HashKey: hashKey})
-	item, err := locationsTable.GetItem(&dynamodb.Key{HashKey: guidRequest.Guid})
+	item, err := locationsTable.GetItem(&dynamodb.Key{HashKey: hashKey})
+	// item, err := locationsTable.GetItem(&dynamodb.Key{HashKey: guidRequest.Guid})
 	if err != nil {
 		log.Error("Error getting item from table: ", err)
 		http.Error(writer, err.Error(), 500)
