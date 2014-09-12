@@ -20,14 +20,14 @@ import (
 	"github.com/goamz/goamz/sqs"
 )
 
-const dynamoTable = "gitw_dev_contest"
 const s3Bucket = "mat_scratch"
 const accessKey = "AKIAJN5MMZYW7MAU27NQ"
 const secretKey = "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"
 const logTimeLayout = "2006-01-02T15:04:05Z"
 const filenameTimeLayout = "20060102T1504Z"
 
-var locations chan *LocationResponse = make(chan *LocationResponse, 10000000)
+var dynamoTable string
+var locations chan *LocationResponse = make(chan *LocationResponse, 100000000)
 var infoLog bool
 var queueName string
 var logSeparator = []byte(" ")
@@ -55,6 +55,10 @@ func main() {
 	workers, err := strconv.Atoi(os.Getenv("WORKERS"))
 	if err != nil {
 		log.Fatalln("Error parsing WORKERS: ", err)
+	}
+	dynamoTable = os.Getenv("DYNAMO_TABLE")
+	if dynamoTable == "" {
+		log.Fatalln("DYNAMO_TABLE must be set!")
 	}
 
 	queueName = "gitw_" + hostNum
@@ -126,6 +130,7 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 	if err := d.Decode(&guidRequest); err != nil {
 		log.Error("Error decoding JSON: ", err)
 		http.Error(writer, err.Error(), 500)
+		return
 	}
 
 	dynamo := dynamodb.Server{
@@ -148,6 +153,8 @@ func (mux *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 	item, err := locationsTable.GetItem(&dynamodb.Key{HashKey: guidRequest.Guid})
 	if err != nil {
 		log.Error("Error getting item from table: ", err)
+		http.Error(writer, err.Error(), 500)
+		return
 	}
 
 	location := &LocationResponse{
