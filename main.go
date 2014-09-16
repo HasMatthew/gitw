@@ -22,12 +22,12 @@ import (
 
 const dynamoTable = "gitw_dev_contest"
 const s3Bucket = "mat_scratch"
-const accessKey = "AKIAJN5MMZYW7MAU27NQ"
-const secretKey = "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"
 const logTimeLayout = "2006-01-02T15:04:05Z"
 const filenameTimeLayout = "20060102T1504Z"
 
 // var locations chan *LocationResponse = make(chan *LocationResponse, 10000000)
+var accessKey string
+var secretKey string
 var infoLog bool
 var queueName string
 var logSeparator = []byte(" ")
@@ -44,6 +44,8 @@ var pk dynamodb.PrimaryKey = dynamodb.PrimaryKey{
 }
 
 func main() {
+	accessKey = os.Getenv("ACCESS_KEY")
+	secretKey = os.Getenv("SECRET_KEY")
 	port := os.Getenv("GITW_PORT")
 	hostNum := os.Getenv("HOST_NUM")
 	if hostNum == "" {
